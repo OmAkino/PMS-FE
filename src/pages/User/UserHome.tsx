@@ -28,11 +28,7 @@ interface TemplateData {
   is_active: boolean;
 }
 
-interface ApiResponse {
-  success: boolean;
-  message: string;
-  data: TemplateData;
-}
+
 
 const UserHome = () => {
   const [file, setFile] = useState<File | null>(null);
@@ -42,6 +38,9 @@ const UserHome = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [availableTemplates, setAvailableTemplates] = useState<string[]>([]);
   const [searchError, setSearchError] = useState("");
+
+  const [templateName, setTemplateName] = useState(""); // New state for template name
+  const [templateDescription, setTemplateDescription] = useState(""); // New state for description
 
   // Fetch available templates on component mount
   useEffect(() => {
@@ -84,18 +83,34 @@ const UserHome = () => {
       return;
     }
 
+    // Validate template name
+    if (!templateName.trim()) {
+      alert("Please enter a template name");
+      return;
+    }
+
     setLoading(true);
-    try {
+     try {
       const formData = new FormData();
       formData.append("file", file);
+      formData.append("templateName", templateName.trim());
+      if (templateDescription.trim()) {
+        formData.append("description", templateDescription.trim());
+      }
 
       const res = await uploadExcelService.uploadHeaderExcel(formData);
       console.log("Uploaded successfully:", res);
 
-      alert("Header Excel uploaded and saved successfully!");
+      // alert(`Template "${templateName}" created successfully!`);
+      
+      // Reset form
       setFile(null);
+      setTemplateName("");
+      setTemplateDescription("");
+      
       // Refresh available templates list
       await fetchAvailableTemplates();
+      
       // Reset file input
       const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
       if (fileInput) fileInput.value = '';
@@ -299,18 +314,53 @@ const UserHome = () => {
         <h2 className="text-xl font-semibold mb-4">Upload Header Excel Template</h2>
         
         <div className="flex flex-col gap-4">
-          <input
-            type="file"
-            accept=".xlsx,.xls"
-            onChange={handleFileChange}
-            className="p-2 border border-gray-300 rounded"
-            disabled={loading}
-          />
+           <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Template Name *
+            </label>
+            <input
+              type="text"
+              value={templateName}
+              onChange={(e) => setTemplateName(e.target.value)}
+              placeholder="Enter unique template name (e.g., PMS-APAC-Q1-2024)"
+              className="w-full p-2 border border-gray-300 rounded"
+              disabled={loading}
+            />
+          </div>
+
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Description (Optional)
+            </label>
+            <textarea
+              value={templateDescription}
+              onChange={(e) => setTemplateDescription(e.target.value)}
+              placeholder="Enter template description"
+              className="w-full p-2 border border-gray-300 rounded"
+              rows={2}
+              disabled={loading}
+            />
+          </div>
+
+
+           <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Excel File *
+            </label>
+            <input
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={handleFileChange}
+              className="w-full p-2 border border-gray-300 rounded"
+              disabled={loading}
+            />
+          </div>
 
           <div className="flex gap-4">
             <button
               onClick={handleUpload}
-              disabled={loading || !file}
+              disabled={loading || !file || !templateName.trim()}
               className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
             >
               {loading ? "Uploading..." : "Upload Template"}
