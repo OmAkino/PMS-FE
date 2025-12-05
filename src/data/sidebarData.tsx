@@ -20,6 +20,11 @@ export const routes = [
         allowedRoles: ["superAdmin"],
     },
     {
+        title: "Template Management",
+        url: "/templateManagement",
+        allowedRoles: ["superAdmin"],
+    },
+    {
         title: "Data Filling",
         url: "/dataFilling",
         allowedRoles: ["superAdmin"],

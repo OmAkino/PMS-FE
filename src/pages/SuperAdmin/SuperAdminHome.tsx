@@ -125,7 +125,11 @@ const SuperAdminHome = () => {
   const handleGetDefaultTemplate = async () => {
     setLoading(true);
     setSearchError("");
+    setTemplate(null);
+    setShowTemplate(false);
+
     try {
+      console.log("Fetching default template...");
       const response = await uploadExcelService.getTemplate();
       console.log("Default template response:", response);
 
@@ -136,13 +140,19 @@ const SuperAdminHome = () => {
         throw new Error("No template data received");
       }
 
+      // Validate that we got the expected structure
+      if (!templateData.template_name || !templateData.sheet_structure) {
+        throw new Error("Invalid template structure received");
+      }
+
       setTemplate(templateData);
       setShowTemplate(true);
       setSearchTerm(templateData.template_name || "Default Template");
-      console.log("Template retrieved:", templateData);
-    } catch (err) {
-      console.error(err);
-      setSearchError("Failed to fetch default template. Please upload a template first.");
+      console.log("Template successfully loaded:", templateData.template_name);
+    } catch (err: any) {
+      console.error("Error fetching default template:", err);
+      const errorMessage = err.response?.data?.message || err.message || "Failed to fetch default template";
+      setSearchError(errorMessage + ". Please upload a template first or try searching by name.");
       setTemplate(null);
       setShowTemplate(false);
     } finally {
@@ -158,7 +168,11 @@ const SuperAdminHome = () => {
 
     setLoading(true);
     setSearchError("");
+    setTemplate(null);
+    setShowTemplate(false);
+
     try {
+      console.log("Searching for template:", searchTerm.trim());
       const response = await uploadExcelService.searchTemplateByName(searchTerm.trim());
       console.log("Search template response:", response);
 
@@ -169,12 +183,18 @@ const SuperAdminHome = () => {
         throw new Error("Template not found");
       }
 
+      // Validate that we got the expected structure
+      if (!templateData.template_name || !templateData.sheet_structure) {
+        throw new Error("Invalid template structure received");
+      }
+
       setTemplate(templateData);
       setShowTemplate(true);
-      console.log("Template retrieved:", templateData);
-    } catch (err) {
-      console.error(err);
-      setSearchError(`Template "${searchTerm}" not found`);
+      console.log("Template successfully loaded:", templateData.template_name);
+    } catch (err: any) {
+      console.error("Error searching for template:", err);
+      const errorMessage = err.response?.data?.message || err.message || "Template not found";
+      setSearchError(`Template "${searchTerm}" not found. ${errorMessage}`);
       setTemplate(null);
       setShowTemplate(false);
     } finally {

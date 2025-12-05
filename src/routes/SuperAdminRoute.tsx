@@ -4,6 +4,8 @@ import SuperAdminHome from '@/pages/SuperAdmin/SuperAdminHome'
 import SuperAdminSetting from '@/pages/SuperAdmin/SuperAdminSetting'
 import EmployeeManagement from '@/pages/SuperAdmin/Employee/EmployeeManagement'
 import DataFillingPage from '@/pages/SuperAdmin/DataFilling/DataFillingPage'
+import ViewUploadedDataPage from '@/pages/SuperAdmin/DataFilling/ViewUploadedDataPage'
+import TemplateManagementPage from '@/pages/SuperAdmin/Templates/TemplateManagementPage'
 import { Route } from 'react-router-dom'
 
 const SuperAdminRoutes = () => (
@@ -13,6 +15,8 @@ const SuperAdminRoutes = () => (
         <Route path='/superAdminSetting' element={<SuperAdminSetting />} />
         <Route path='/employeeManagement' element={<EmployeeManagement />} />
         <Route path='/dataFilling' element={<DataFillingPage />} />
+        <Route path='/viewUploadedData' element={<ViewUploadedDataPage />} />
+        <Route path='/templateManagement' element={<TemplateManagementPage />} />
     </Route>
 )
 
