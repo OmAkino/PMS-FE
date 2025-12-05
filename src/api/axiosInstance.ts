@@ -41,13 +41,24 @@ axiosInstance.interceptors.request.use(
       (config.headers as any)["Authorization"] = `Bearer ${accessToken}`;
     }
 
-    //  Safely add userId to request
-    if (user && typeof user["id"] === "number") {
+    // Safely add userId to requests. Accept string or number id (Mongo ObjectId is a string).
+    if (user && user["id"] !== undefined && user["id"] !== null) {
       const userId = user["id"];
       const method = config.method?.toLowerCase();
 
       if (["post", "put", "patch"].includes(method || "")) {
-        config.data = { ...(config.data || {}), userId };
+        // If request body is FormData (file upload), append the userId so multipart remains intact
+        if (typeof FormData !== "undefined" && config.data instanceof FormData) {
+          try {
+            // Append only if not already present
+            if (!config.data.get("userId")) config.data.append("userId", String(userId));
+          } catch (e) {
+            // Fallback: if FormData handling fails, merge as object
+            config.data = { ...(config.data || {}), userId };
+          }
+        } else {
+          config.data = { ...(config.data || {}), userId };
+        }
       } else if (method === "get") {
         config.params = { ...(config.params || {}), userId };
       }

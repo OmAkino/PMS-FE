@@ -1,33 +1,43 @@
 export const routes = [
     {
-        title:"Home",
+        title: "Home",
         url: "/",
         allowedRoles: ["superAdmin", "user"],
     },
     {
-        title:"Setting",
+        title: "Setting",
         url: "/setting",
         allowedRoles: ["superAdmin", "user"],
     },
     {
-        title:"Super Admin Setting",
+        title: "Super Admin Setting",
         url: "/superAdminSetting",
         allowedRoles: ["superAdmin"],
     },
     {
-        title:"User Setting",
+        title: "Employee Management",
+        url: "/employeeManagement",
+        allowedRoles: ["superAdmin"],
+    },
+    {
+        title: "Data Filling",
+        url: "/dataFilling",
+        allowedRoles: ["superAdmin"],
+    },
+    {
+        title: "User Setting",
         url: "/userSetting",
         allowedRoles: ["user"],
     }
 ]
 
-export const temRoute = [ 
+export const temRoute = [
     {
-        title:"Home",
+        title: "Home",
         url: "/",
     },
     {
-        title:"Setting",
-        url:"/Setting",
+        title: "Setting",
+        url: "/Setting",
     }
 ]
