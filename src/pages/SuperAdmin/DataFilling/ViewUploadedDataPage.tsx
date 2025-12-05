@@ -20,9 +20,10 @@ import {
     CheckCircle,
     Loader2,
     RefreshCw,
-    Info,
     Calculator,
     Grid,
+    Eye,
+    EyeOff,
 } from "lucide-react";
 
 interface EmployeeData {
@@ -117,9 +118,9 @@ export default function ViewUploadedDataPage() {
     const [batchInfo, setBatchInfo] = useState<any>(null);
 
     // Template visualization states
-    const [showTemplateView, setShowTemplateView] = useState(false);
     const [templateStructure, setTemplateStructure] = useState<TemplateStructure | null>(null);
     const [loadingTemplate, setLoadingTemplate] = useState(false);
+    const [showFormulas, setShowFormulas] = useState(false);
 
     useEffect(() => {
         if (batchId) {
@@ -129,6 +130,13 @@ export default function ViewUploadedDataPage() {
             navigate("/dataFilling");
         }
     }, [batchId]);
+
+    // Auto-load template structure when template is available
+    useEffect(() => {
+        if (template && !templateStructure) {
+            loadTemplateStructure();
+        }
+    }, [template]);
 
     const fetchUploadedData = async () => {
         if (!batchId) return;
@@ -150,6 +158,23 @@ export default function ViewUploadedDataPage() {
             toast.error(error.response?.data?.message || "Failed to fetch uploaded data");
         } finally {
             setLoading(false);
+        }
+    };
+
+    const loadTemplateStructure = async () => {
+        if (!template) return;
+
+        setLoadingTemplate(true);
+        try {
+            const response = await uploadExcelService.searchTemplateByName(template.template_name);
+            const templateData = response.data || response;
+            if (templateData) {
+                setTemplateStructure(templateData);
+            }
+        } catch (error: any) {
+            console.error("Failed to load template structure", error);
+        } finally {
+            setLoadingTemplate(false);
         }
     };
 
@@ -183,165 +208,215 @@ export default function ViewUploadedDataPage() {
         }
     };
 
-    const handleLoadTemplateStructure = async () => {
-        if (!template) {
-            toast.error("No template information available");
-            return;
+    const getColumnLetter = (index: number): string => {
+        let result = '';
+        let num = index;
+        while (num >= 0) {
+            result = String.fromCharCode(65 + (num % 26)) + result;
+            num = Math.floor(num / 26) - 1;
         }
-
-        setLoadingTemplate(true);
-        try {
-            const response = await uploadExcelService.searchTemplateByName(template.template_name);
-            console.log("Template structure response:", response);
-
-            const templateData = response.data || response;
-            if (!templateData) {
-                throw new Error("No template data received");
-            }
-
-            setTemplateStructure(templateData);
-            setShowTemplateView(true);
-            toast.success("Template structure loaded successfully!");
-        } catch (error: any) {
-            console.error("Failed to load template structure", error);
-            toast.error(error.response?.data?.message || "Failed to load template structure");
-        } finally {
-            setLoadingTemplate(false);
-        }
+        return result;
     };
 
     const getCellValue = (cellData: any) => {
-        // Handle formula cells
         if (cellData && typeof cellData === 'object' && cellData.calculatedValue !== undefined) {
             return cellData.calculatedValue;
         }
         return cellData !== undefined && cellData !== null ? cellData : '';
     };
 
-    const isFormulaCell = (headerName: string) => {
+    const isFormulaColumn = (colIndex: number): boolean => {
         if (!template?.formula_definitions) return false;
-
-        const columnIndex = template.column_mappings?.findIndex(cm => cm.headerName === headerName);
-        if (columnIndex === -1) return false;
-
-        return template.formula_definitions.some(fd => {
-            // Check if this formula definition applies to this column
-            const colLetter = String.fromCharCode(65 + columnIndex);
-            return fd.cellAddress.startsWith(colLetter);
-        });
+        const colLetter = getColumnLetter(colIndex);
+        return template.formula_definitions.some(fd => fd.cellAddress.startsWith(colLetter));
     };
 
-    const getColumnLetter = (index: number): string => {
-        return String.fromCharCode(65 + index);
+    const getFormulaForColumn = (colIndex: number): string | null => {
+        if (!template?.formula_definitions) return null;
+        const colLetter = getColumnLetter(colIndex);
+        const formula = template.formula_definitions.find(fd => fd.cellAddress.startsWith(colLetter));
+        return formula ? formula.formula : null;
     };
 
-    const renderExcelGrid = () => {
-        if (!templateStructure) return null;
+    // Build the complete Excel-like grid with template structure + data
+    const buildExcelGrid = () => {
+        if (!template || !templateStructure) return null;
 
         const { sheet_structure, metadata } = templateStructure;
-        const total_rows = metadata?.total_rows || 0;
-        const total_columns = metadata?.total_columns || 0;
+        const headerRow = template.header_row_index || 0;
+        const dataStartRow = template.data_start_row || 1;
+        const totalColumns = metadata?.total_columns || template.column_mappings?.length || 0;
 
-        if (!sheet_structure || !Array.isArray(sheet_structure)) {
-            return (
-                <div className="text-red-500 p-4 bg-red-50 rounded">
-                    No sheet structure data available for this template.
-                </div>
-            );
-        }
+        // Calculate total rows: template rows + uploaded data rows
+        const templateRows = dataStartRow; // Rows before data (headers, metadata)
+        const dataRows = employeeData.length;
+        const totalRows = templateRows + dataRows;
 
-        if (total_rows === 0 || total_columns === 0) {
-            return (
-                <div className="text-yellow-500 p-4 bg-yellow-50 rounded">
-                    Template dimensions are not defined.
-                </div>
-            );
-        }
-
-        // Create a 2D array to represent the Excel grid
-        const grid: (CellDefinition | null)[][] = Array.from({ length: total_rows }, () =>
-            Array.from({ length: total_columns }, () => null)
-        );
-
-        // Populate the grid with cell data
-        sheet_structure.forEach(cell => {
-            if (cell && cell.row < total_rows && cell.col < total_columns) {
-                grid[cell.row][cell.col] = cell;
-            }
+        // Create cell lookup from template structure
+        const templateCells: Map<string, CellDefinition> = new Map();
+        sheet_structure?.forEach(cell => {
+            templateCells.set(`${cell.row}-${cell.col}`, cell);
         });
 
         return (
-            <div className="mt-6">
-                <h3 className="text-lg font-semibold mb-4">Template Structure: {templateStructure.template_name}</h3>
-
-                {/* Template Info */}
-                <div className="mb-4 p-3 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-lg">
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
-                        <p><strong>Template Name:</strong> {templateStructure.template_name}</p>
-                        <p><strong>Description:</strong> {templateStructure.description}</p>
-                        <p><strong>Version:</strong> {templateStructure.version}</p>
-                        <p><strong>Grid Size:</strong> {total_rows} rows × {total_columns} columns</p>
-                        <p><strong>Data Input Cells:</strong> {metadata?.data_input_ranges?.length || 0}</p>
-                        <p><strong>Formula Cells:</strong> {metadata?.formula_rows?.length || 0}</p>
+            <div className="border-2 border-gray-400 rounded-lg overflow-hidden bg-white dark:bg-gray-900">
+                {/* Excel-like header bar */}
+                <div className="bg-gradient-to-r from-green-600 to-green-700 text-white px-4 py-2 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <FileSpreadsheet className="h-5 w-5" />
+                        <span className="font-semibold">{template.template_name}</span>
+                        <span className="text-xs bg-white/20 px-2 py-0.5 rounded">v{template.version}</span>
+                    </div>
+                    <div className="flex items-center gap-4 text-sm">
+                        <span>{totalColumns} columns</span>
+                        <span>•</span>
+                        <span>{totalRows} rows</span>
+                        <span>•</span>
+                        <span>{dataRows} data rows</span>
                     </div>
                 </div>
 
-                {/* Excel-like Grid */}
-                <div className="overflow-auto border border-gray-300 rounded-lg" style={{ maxHeight: '500px' }}>
-                    <table className="min-w-full border-collapse">
-                        <tbody>
-                            {grid.map((row, rowIndex) => (
-                                <tr key={rowIndex}>
-                                    {row.map((cell, colIndex) => (
-                                        <td
+                {/* Excel grid */}
+                <div className="overflow-auto" style={{ maxHeight: '70vh' }}>
+                    <table className="w-full border-collapse" style={{ minWidth: `${totalColumns * 120}px` }}>
+                        {/* Column headers (A, B, C...) */}
+                        <thead className="sticky top-0 z-20">
+                            <tr className="bg-gray-200 dark:bg-gray-700">
+                                {/* Row number header */}
+                                <th className="w-12 min-w-12 border border-gray-400 bg-gray-300 dark:bg-gray-600 text-center text-xs font-bold p-1 sticky left-0 z-30">
+
+                                </th>
+                                {/* Column letters */}
+                                {Array.from({ length: totalColumns }).map((_, colIndex) => {
+                                    const isFormula = isFormulaColumn(colIndex);
+                                    return (
+                                        <th
                                             key={colIndex}
-                                            className={`
-                                                border border-gray-300 p-2 min-w-20 max-w-40 truncate text-xs
-                                                ${cell?.type === 'header' ? 'bg-blue-100 dark:bg-blue-900/40 font-semibold' : ''}
-                                                ${cell?.type === 'formula' ? 'bg-green-100 dark:bg-green-900/30 italic' : ''}
-                                                ${cell?.type === 'metadata' ? 'bg-yellow-100 dark:bg-yellow-900/30' : ''}
-                                                ${cell?.type === 'data' ? 'bg-white dark:bg-gray-800' : ''}
-                                                ${cell?.is_locked ? 'cursor-not-allowed opacity-75' : 'cursor-cell'}
-                                            `}
-                                            title={cell?.formula ? `Formula: ${cell.formula}` : cell?.value?.toString()}
+                                            className={`min-w-28 border border-gray-400 text-center text-xs font-bold p-1 ${isFormula
+                                                    ? 'bg-blue-200 dark:bg-blue-800 text-blue-900 dark:text-blue-100'
+                                                    : 'bg-gray-300 dark:bg-gray-600'
+                                                }`}
                                         >
-                                            {cell ? (
-                                                <div>
-                                                    <div className="font-mono text-gray-500 dark:text-gray-400 text-xs">
-                                                        {cell.address}
-                                                    </div>
+                                            <div className="flex items-center justify-center gap-1">
+                                                {getColumnLetter(colIndex)}
+                                                {isFormula && <Calculator className="h-3 w-3" />}
+                                            </div>
+                                        </th>
+                                    );
+                                })}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {/* Template header rows (before data) */}
+                            {Array.from({ length: templateRows }).map((_, rowIndex) => (
+                                <tr key={`template-${rowIndex}`} className="bg-blue-50 dark:bg-blue-900/20">
+                                    {/* Row number */}
+                                    <td className="border border-gray-400 bg-gray-200 dark:bg-gray-700 text-center text-xs font-bold p-1 sticky left-0 z-10">
+                                        {rowIndex + 1}
+                                    </td>
+                                    {/* Cells from template */}
+                                    {Array.from({ length: totalColumns }).map((_, colIndex) => {
+                                        const cell = templateCells.get(`${rowIndex}-${colIndex}`);
+                                        const isHeader = cell?.type === 'header' || rowIndex === headerRow;
+                                        const hasFormula = cell?.formula;
+                                        const isFormulaCol = isFormulaColumn(colIndex);
+
+                                        return (
+                                            <td
+                                                key={colIndex}
+                                                className={`border border-gray-300 p-2 text-sm ${isHeader
+                                                        ? 'bg-blue-100 dark:bg-blue-900/40 font-bold text-blue-900 dark:text-blue-100'
+                                                        : hasFormula
+                                                            ? 'bg-green-100 dark:bg-green-900/30 font-mono text-green-800 dark:text-green-300'
+                                                            : isFormulaCol
+                                                                ? 'bg-blue-50 dark:bg-blue-900/10'
+                                                                : 'bg-white dark:bg-gray-800'
+                                                    }`}
+                                                title={hasFormula ? `Formula: =${cell.formula}` : cell?.value?.toString()}
+                                            >
+                                                {cell ? (
                                                     <div className="truncate">
-                                                        {cell.formula ? `=${cell.formula}` : cell.value?.toString() || ''}
+                                                        {hasFormula && showFormulas
+                                                            ? <span className="text-green-600 dark:text-green-400">={cell.formula}</span>
+                                                            : cell.value?.toString() || ''
+                                                        }
                                                     </div>
-                                                </div>
-                                            ) : (
-                                                <span className="text-gray-300">—</span>
-                                            )}
-                                        </td>
-                                    ))}
+                                                ) : (
+                                                    <span className="text-gray-300">—</span>
+                                                )}
+                                            </td>
+                                        );
+                                    })}
                                 </tr>
                             ))}
+
+                            {/* Data rows (uploaded employee data) */}
+                            {employeeData.map((record, dataIndex) => {
+                                const rowNumber = templateRows + dataIndex + 1;
+                                return (
+                                    <tr key={`data-${dataIndex}`} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                                        {/* Row number */}
+                                        <td className="border border-gray-400 bg-gray-200 dark:bg-gray-700 text-center text-xs font-bold p-1 sticky left-0 z-10">
+                                            {rowNumber}
+                                        </td>
+                                        {/* Data cells */}
+                                        {template.column_mappings?.map((column, colIndex) => {
+                                            const cellData = record.data[column.headerName];
+                                            const value = getCellValue(cellData);
+                                            const isFormulaCol = isFormulaColumn(colIndex);
+                                            const hasFormula = cellData && typeof cellData === 'object' && cellData.formula;
+                                            const formula = hasFormula ? cellData.formula : getFormulaForColumn(colIndex);
+
+                                            return (
+                                                <td
+                                                    key={colIndex}
+                                                    className={`border border-gray-300 p-2 text-sm ${isFormulaCol
+                                                            ? 'bg-blue-50 dark:bg-blue-900/10 text-blue-900 dark:text-blue-100'
+                                                            : 'bg-white dark:bg-gray-800'
+                                                        }`}
+                                                    title={formula ? `Formula: =${formula}\nValue: ${value}` : value?.toString()}
+                                                >
+                                                    <div className="truncate">
+                                                        {showFormulas && formula ? (
+                                                            <span className="text-green-600 dark:text-green-400 font-mono text-xs">
+                                                                ={formula}
+                                                            </span>
+                                                        ) : (
+                                                            typeof value === 'number' ? value.toLocaleString() : value
+                                                        )}
+                                                    </div>
+                                                </td>
+                                            );
+                                        })}
+                                    </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
                 </div>
 
-                {/* Cell Type Legend */}
-                <div className="mt-4 flex flex-wrap gap-4 text-sm">
-                    <div className="flex items-center">
-                        <div className="w-4 h-4 bg-blue-100 dark:bg-blue-900/40 mr-2 border"></div>
-                        <span>Header</span>
+                {/* Excel-like footer/status bar */}
+                <div className="bg-gray-100 dark:bg-gray-800 border-t border-gray-400 px-4 py-2 flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-4">
+                        <span className="flex items-center gap-1">
+                            <div className="w-3 h-3 bg-blue-100 border border-gray-400"></div>
+                            Header
+                        </span>
+                        <span className="flex items-center gap-1">
+                            <div className="w-3 h-3 bg-green-100 border border-gray-400"></div>
+                            Formula
+                        </span>
+                        <span className="flex items-center gap-1">
+                            <div className="w-3 h-3 bg-blue-50 border border-gray-400"></div>
+                            Formula Column
+                        </span>
+                        <span className="flex items-center gap-1">
+                            <div className="w-3 h-3 bg-white border border-gray-400"></div>
+                            Data
+                        </span>
                     </div>
-                    <div className="flex items-center">
-                        <div className="w-4 h-4 bg-green-100 dark:bg-green-900/30 mr-2 border"></div>
-                        <span>Formula</span>
-                    </div>
-                    <div className="flex items-center">
-                        <div className="w-4 h-4 bg-yellow-100 dark:bg-yellow-900/30 mr-2 border"></div>
-                        <span>Metadata</span>
-                    </div>
-                    <div className="flex items-center">
-                        <div className="w-4 h-4 bg-white dark:bg-gray-800 mr-2 border"></div>
-                        <span>Data Input</span>
+                    <div className="text-gray-600 dark:text-gray-400">
+                        Sheet: {template.template_name} | Rows: {templateRows + employeeData.length} | Columns: {totalColumns}
                     </div>
                 </div>
             </div>
@@ -386,28 +461,27 @@ export default function ViewUploadedDataPage() {
                 <div className="flex gap-2">
                     <Button
                         variant="outline"
+                        onClick={() => setShowFormulas(!showFormulas)}
+                    >
+                        {showFormulas ? (
+                            <>
+                                <EyeOff className="h-4 w-4 mr-2" />
+                                Hide Formulas
+                            </>
+                        ) : (
+                            <>
+                                <Eye className="h-4 w-4 mr-2" />
+                                Show Formulas
+                            </>
+                        )}
+                    </Button>
+                    <Button
+                        variant="outline"
                         onClick={fetchUploadedData}
                         disabled={loading}
                     >
                         <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
                         Refresh
-                    </Button>
-                    <Button
-                        variant="outline"
-                        onClick={handleLoadTemplateStructure}
-                        disabled={loadingTemplate || !template}
-                    >
-                        {loadingTemplate ? (
-                            <>
-                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                Loading...
-                            </>
-                        ) : (
-                            <>
-                                <Grid className="h-4 w-4 mr-2" />
-                                {showTemplateView ? 'Hide' : 'View'} Template
-                            </>
-                        )}
                     </Button>
                     <Button
                         onClick={handleDownloadExcel}
@@ -428,47 +502,13 @@ export default function ViewUploadedDataPage() {
                 </div>
             </div>
 
-            {/* Template Information Banner */}
-            {template && (
-                <Card className="bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800">
-                    <CardHeader className="pb-3">
-                        <CardTitle className="text-sm font-medium flex items-center gap-2">
-                            <Info className="h-4 w-4" />
-                            Template Information
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                            <div>
-                                <span className="text-muted-foreground">Version:</span>
-                                <span className="ml-2 font-medium">v{template.version}</span>
-                            </div>
-                            <div>
-                                <span className="text-muted-foreground">Total Columns:</span>
-                                <span className="ml-2 font-medium">{template.column_mappings?.length || 0}</span>
-                            </div>
-                            <div>
-                                <span className="text-muted-foreground">Formula Columns:</span>
-                                <span className="ml-2 font-medium text-blue-600">
-                                    {template.formula_definitions?.length || 0}
-                                </span>
-                            </div>
-                            <div>
-                                <span className="text-muted-foreground">Data Rows:</span>
-                                <span className="ml-2 font-medium">{employeeData.length}</span>
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
-            )}
-
             {/* Summary Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                 <Card>
-                    <CardHeader className="pb-3">
+                    <CardHeader className="pb-2">
                         <CardTitle className="text-sm font-medium flex items-center gap-2">
                             <Users className="h-4 w-4 text-muted-foreground" />
-                            Total Employees
+                            Employees
                         </CardTitle>
                     </CardHeader>
                     <CardContent>
@@ -476,10 +516,10 @@ export default function ViewUploadedDataPage() {
                     </CardContent>
                 </Card>
                 <Card>
-                    <CardHeader className="pb-3">
+                    <CardHeader className="pb-2">
                         <CardTitle className="text-sm font-medium flex items-center gap-2">
-                            <FileSpreadsheet className="h-4 w-4 text-muted-foreground" />
-                            Template Columns
+                            <Grid className="h-4 w-4 text-muted-foreground" />
+                            Columns
                         </CardTitle>
                     </CardHeader>
                     <CardContent>
@@ -487,10 +527,10 @@ export default function ViewUploadedDataPage() {
                     </CardContent>
                 </Card>
                 <Card>
-                    <CardHeader className="pb-3">
+                    <CardHeader className="pb-2">
                         <CardTitle className="text-sm font-medium flex items-center gap-2">
                             <Calculator className="h-4 w-4 text-blue-600" />
-                            Formula Columns
+                            Formulas
                         </CardTitle>
                     </CardHeader>
                     <CardContent>
@@ -500,10 +540,23 @@ export default function ViewUploadedDataPage() {
                     </CardContent>
                 </Card>
                 <Card>
-                    <CardHeader className="pb-3">
+                    <CardHeader className="pb-2">
+                        <CardTitle className="text-sm font-medium flex items-center gap-2">
+                            <FileSpreadsheet className="h-4 w-4 text-green-600" />
+                            Version
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="text-2xl font-bold text-green-600">
+                            v{template?.version || "1.0"}
+                        </div>
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardHeader className="pb-2">
                         <CardTitle className="text-sm font-medium flex items-center gap-2">
                             <Calendar className="h-4 w-4 text-muted-foreground" />
-                            Uploaded On
+                            Uploaded
                         </CardTitle>
                     </CardHeader>
                     <CardContent>
@@ -516,162 +569,91 @@ export default function ViewUploadedDataPage() {
                 </Card>
             </div>
 
-            {/* Data Table in Template Format */}
-            <Card>
-                <CardHeader>
+            {/* Excel View */}
+            <Card className="overflow-hidden">
+                <CardHeader className="bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border-b">
                     <div className="flex items-center justify-between">
                         <div>
-                            <CardTitle>Template Data View</CardTitle>
+                            <CardTitle className="flex items-center gap-2">
+                                <FileSpreadsheet className="h-5 w-5 text-green-600" />
+                                Excel Template View
+                            </CardTitle>
                             <CardDescription>
-                                Showing data in original template format
-                                {template?.formula_definitions && template.formula_definitions.length > 0 && (
-                                    <span className="ml-2 text-blue-600">
-                                        • Blue columns contain formulas
-                                    </span>
-                                )}
+                                Showing uploaded data in exact template format
                             </CardDescription>
                         </div>
-                        <div className="text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-3 py-1 rounded-full flex items-center gap-1">
-                            <CheckCircle className="h-3 w-3" />
-                            All Data Processed
+                        <div className="flex items-center gap-2">
+                            {loadingTemplate && (
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    Loading template...
+                                </div>
+                            )}
+                            <div className="text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-3 py-1 rounded-full flex items-center gap-1">
+                                <CheckCircle className="h-3 w-3" />
+                                {employeeData.length} Records
+                            </div>
                         </div>
                     </div>
                 </CardHeader>
-                <CardContent>
-                    {employeeData.length === 0 ? (
-                        <div className="text-center py-12">
-                            <FileSpreadsheet className="h-16 w-16 mx-auto mb-4 text-muted-foreground opacity-50" />
-                            <p className="text-muted-foreground">No data found for this batch</p>
+                <CardContent className="p-4">
+                    {templateStructure ? (
+                        buildExcelGrid()
+                    ) : loadingTemplate ? (
+                        <div className="flex items-center justify-center py-12">
+                            <Loader2 className="h-8 w-8 animate-spin text-green-600" />
                         </div>
                     ) : (
-                        <div className="border rounded-lg overflow-hidden">
-                            <div className="overflow-x-auto" style={{ maxHeight: '600px' }}>
-                                <table className="w-full text-sm">
-                                    <thead className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 sticky top-0 z-10">
-                                        <tr>
-                                            <th className="px-4 py-3 text-center font-semibold border-r bg-gray-100 dark:bg-gray-800 w-12">
-                                                #
-                                            </th>
-                                            {template?.column_mappings?.map((column, idx) => {
-                                                const isFormula = isFormulaCell(column.headerName);
-                                                return (
-                                                    <th
-                                                        key={idx}
-                                                        className={`px-4 py-3 text-left font-semibold border-r min-w-[120px] whitespace-nowrap ${isFormula
-                                                            ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-900 dark:text-blue-200'
-                                                            : ''
-                                                            }`}
-                                                        title={isFormula ? `Formula column (${getColumnLetter(idx)})` : ''}
-                                                    >
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="text-xs text-muted-foreground font-normal">
-                                                                {getColumnLetter(idx)}
-                                                            </span>
-                                                            <span>{column.headerName}</span>
-                                                            {isFormula && (
-                                                                <Calculator className="h-3 w-3 text-blue-600" />
-                                                            )}
-                                                        </div>
-                                                    </th>
-                                                );
-                                            })}
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y">
-                                        {employeeData.map((record, rowIdx) => (
-                                            <tr
-                                                key={rowIdx}
-                                                className="hover:bg-muted/30 transition-colors"
-                                            >
-                                                <td className="px-4 py-3 border-r font-medium text-center text-muted-foreground bg-gray-50 dark:bg-gray-900/50">
-                                                    {rowIdx + 1}
-                                                </td>
-                                                {template?.column_mappings?.map((column, colIdx) => {
-                                                    const cellValue = getCellValue(record.data[column.headerName]);
-                                                    const isFormula = record.data[column.headerName] &&
-                                                        typeof record.data[column.headerName] === 'object' &&
-                                                        record.data[column.headerName].formula;
-                                                    const formulaText = isFormula ? record.data[column.headerName].formula : null;
-
-                                                    return (
-                                                        <td
-                                                            key={colIdx}
-                                                            className={`px-4 py-3 border-r ${isFormula
-                                                                ? 'bg-blue-50 dark:bg-blue-900/10 font-medium'
-                                                                : ''
-                                                                }`}
-                                                            title={formulaText ? `Formula: ${formulaText}` : ''}
-                                                        >
-                                                            {typeof cellValue === 'number'
-                                                                ? cellValue.toLocaleString()
-                                                                : cellValue}
-                                                        </td>
-                                                    );
-                                                })}
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
+                        <div className="text-center py-12">
+                            <FileSpreadsheet className="h-16 w-16 mx-auto mb-4 text-muted-foreground opacity-50" />
+                            <p className="text-muted-foreground">Template structure not available</p>
+                            <Button
+                                variant="outline"
+                                className="mt-4"
+                                onClick={loadTemplateStructure}
+                            >
+                                Load Template
+                            </Button>
                         </div>
                     )}
                 </CardContent>
             </Card>
 
-            {/* Formula Legend */}
+            {/* Formula Definitions */}
             {template?.formula_definitions && template.formula_definitions.length > 0 && (
                 <Card className="bg-blue-50/50 dark:bg-blue-900/10">
                     <CardHeader className="pb-3">
                         <CardTitle className="text-sm font-medium flex items-center gap-2">
-                            <Calculator className="h-4 w-4" />
-                            Formula Definitions
+                            <Calculator className="h-4 w-4 text-blue-600" />
+                            Formula Definitions Applied
                         </CardTitle>
+                        <CardDescription>
+                            These formulas were automatically calculated when data was uploaded
+                        </CardDescription>
                     </CardHeader>
                     <CardContent>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                             {template.formula_definitions.map((formula, idx) => (
-                                <div key={idx} className="p-3 bg-white dark:bg-gray-800 rounded-lg border">
-                                    <div className="font-medium text-blue-600 mb-1">
-                                        Cell {formula.cellAddress}
+                                <div key={idx} className="p-3 bg-white dark:bg-gray-800 rounded-lg border shadow-sm">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <span className="font-mono text-sm bg-blue-100 dark:bg-blue-900/40 px-2 py-0.5 rounded">
+                                            {formula.cellAddress}
+                                        </span>
+                                        <span className="text-xs text-muted-foreground">
+                                            Column {formula.cellAddress.replace(/\d+/g, '')}
+                                        </span>
                                     </div>
-                                    <code className="text-xs bg-gray-100 dark:bg-gray-900 px-2 py-1 rounded">
-                                        {formula.formula}
+                                    <code className="text-sm text-green-600 dark:text-green-400 font-mono block">
+                                        ={formula.formula}
                                     </code>
                                     {formula.description && (
-                                        <p className="text-xs text-muted-foreground mt-1">
+                                        <p className="text-xs text-muted-foreground mt-2">
                                             {formula.description}
                                         </p>
                                     )}
                                 </div>
                             ))}
                         </div>
-                    </CardContent>
-                </Card>
-            )}
-
-            {/* Template Structure Viewer */}
-            {showTemplateView && templateStructure && (
-                <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20">
-                    <CardHeader>
-                        <div className="flex items-center justify-between">
-                            <CardTitle className="flex items-center gap-2">
-                                <FileSpreadsheet className="h-5 w-5" />
-                                Template Structure Visualization
-                            </CardTitle>
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setShowTemplateView(false)}
-                            >
-                                Close
-                            </Button>
-                        </div>
-                        <CardDescription>
-                            Visualize the exact template format with formulas, headers, and data cells
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        {renderExcelGrid()}
                     </CardContent>
                 </Card>
             )}
